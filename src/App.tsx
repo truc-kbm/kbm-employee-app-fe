@@ -66,9 +66,38 @@ function Sidebar({ lang, route, expanded, drawerOpen, workspaceOpen, userName, u
   return <><div className="desktop-sidebar">{content}</div>{drawerOpen && <div className="drawer-layer"><button className="drawer-scrim" onClick={onClose} aria-label="Close menu"/>{content}</div>}</>
 }
 
-function AppHeader({ lang, route, name, role, onMenu }: { lang: Lang; route: AppRoute; name: string; role: string; onMenu: () => void }) {
+function AppHeader({ lang, route, name, email, role, onMenu, onNavigate, onSignOut }: { lang: Lang; route: AppRoute; name: string; email: string; role: string; onMenu: () => void; onNavigate: (route: AppRoute) => void; onSignOut: () => void }) {
   const t = copy[lang]
-  return <header className="app-header"><button className="hamburger" onClick={onMenu} aria-label="Open menu"><Icon name="menu"/></button><div className="header-title"><b>{route === '/welcome' ? t.home : 'SOPs Chat Bot'}</b><span>{route === '/welcome' ? t.topHomeSub : t.topChatSub}</span></div><div className="header-user"><span><b>{name}</b><small>{role} · Bellaire 02</small></span><div className="avatar">{initials(name)}</div></div></header>
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const userMenuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!userMenuOpen) return
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!userMenuRef.current?.contains(event.target as Node)) setUserMenuOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setUserMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOnOutsideClick)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [userMenuOpen])
+
+  function chooseRoute(nextRoute: AppRoute) {
+    setUserMenuOpen(false)
+    onNavigate(nextRoute)
+  }
+
+  function chooseSignOut() {
+    setUserMenuOpen(false)
+    onSignOut()
+  }
+
+  return <header className="app-header"><button className="hamburger" onClick={onMenu} aria-label="Open menu"><Icon name="menu"/></button><div className="header-title"><b>{route === '/welcome' ? t.home : 'SOPs Chat Bot'}</b><span>{route === '/welcome' ? t.topHomeSub : t.topChatSub}</span></div><div className="header-user" ref={userMenuRef}><button className="header-user-trigger" onClick={() => setUserMenuOpen(open => !open)} aria-expanded={userMenuOpen} aria-haspopup="menu" aria-label={lang === 'vi' ? 'Mở menu tài khoản' : 'Open account menu'}><span><b>{name}</b><small>{role} · Bellaire 02</small></span><span className="avatar">{initials(name)}</span><span className={`header-user-chevron${userMenuOpen ? ' open' : ''}`}><Icon name="chevron" size={15}/></span></button>{userMenuOpen && <div className="header-user-menu" role="menu"><div className="header-user-summary"><b>{name}</b><small>{email}</small></div><button role="menuitem" onClick={() => chooseRoute('/welcome')}><Icon name="grid" size={17}/><span>{t.home}</span>{route === '/welcome' && <Icon name="check" size={15}/>}</button><button role="menuitem" onClick={() => chooseRoute('/sops-chat')}><Icon name="message" size={17}/><span>SOPs Chat Bot</span>{route === '/sops-chat' && <Icon name="check" size={15}/>}</button><div className="header-menu-separator"/><button className="header-signout" role="menuitem" onClick={chooseSignOut}><Icon name="logout" size={17}/><span>{t.signOut}</span></button></div>}</div></header>
 }
 
 function Welcome({ lang, firstName, onOpenChat }: { lang: Lang; firstName: string; onOpenChat: () => void }) {
@@ -227,7 +256,7 @@ function App() {
   if (!authReady) return <div className="loading"><img src="/logo-mark.png" alt="King Bánh Mì"/></div>
   if (!user) return null
   const userName = user.displayName || 'Frank Nguyễn', firstName = userName.split(/\s+/)[0]
-  return <div className={`app-frame ${expanded ? '' : 'sidebar-collapsed'}`}><Sidebar lang={lang} route={route} expanded={expanded} drawerOpen={drawerOpen} workspaceOpen={workspaceOpen} userName={userName} userEmail={user.email} onNavigate={go} onClose={() => setDrawerOpen(false)} onToggleExpanded={toggleExpanded} onToggleWorkspace={() => setWorkspaceOpen(old => !old)} onSignOut={logout}/><main className="app-main"><AppHeader lang={lang} route={route} name={userName} role={copy[lang].shiftRole} onMenu={() => setDrawerOpen(true)}/><div className="app-toolbar"><LanguageToggle lang={lang} onChange={setLang}/></div>{route === '/welcome' ? <Welcome lang={lang} firstName={firstName} onOpenChat={() => go('/sops-chat')}/> : <Chat key={lang} lang={lang}/>}</main></div>
+  return <div className={`app-frame ${expanded ? '' : 'sidebar-collapsed'}`}><Sidebar lang={lang} route={route} expanded={expanded} drawerOpen={drawerOpen} workspaceOpen={workspaceOpen} userName={userName} userEmail={user.email} onNavigate={go} onClose={() => setDrawerOpen(false)} onToggleExpanded={toggleExpanded} onToggleWorkspace={() => setWorkspaceOpen(old => !old)} onSignOut={logout}/><main className="app-main"><AppHeader lang={lang} route={route} name={userName} email={user.email} role={copy[lang].shiftRole} onMenu={() => setDrawerOpen(true)} onNavigate={go} onSignOut={logout}/><div className="app-toolbar"><LanguageToggle lang={lang} onChange={setLang}/></div>{route === '/welcome' ? <Welcome lang={lang} firstName={firstName} onOpenChat={() => go('/sops-chat')}/> : <Chat key={lang} lang={lang}/>}</main></div>
 }
 
 export default App
