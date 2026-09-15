@@ -15,6 +15,7 @@ export class ApiError extends Error {
   }
 }
 
+export type ApiEnvelope<T> = { data: T; meta: { requestId: string; limit?: number | null; offset?: number | null } }
 type ErrorEnvelope = { error?: { code?: string; message?: string; requestId?: string } }
 
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T | undefined> {

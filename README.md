@@ -1,6 +1,6 @@
 # KBM Employee App Frontend
 
-Frontend React + TypeScript + Vite cho KBM Employee App. Giao diện responsive theo design handoff, có đăng nhập Google, kiểm tra domain `@kingbanhmi.net`, màn hình ca làm việc, SOPs Chat Bot và song ngữ EN/VI.
+Frontend React + TypeScript + Vite cho KBM Employee App. Giao diện responsive theo design handoff, có đăng nhập Google/Firebase, xác nhận quyền nhân viên qua KBM Backend, SOPs Chat streaming và song ngữ EN/VI.
 
 ## Chạy local
 

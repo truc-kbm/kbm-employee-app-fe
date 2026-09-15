@@ -1,6 +1,8 @@
-import { onAuthStateChanged, signInWithPopup, signOut, type User as FirebaseUser } from 'firebase/auth'
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth'
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { ApiError, apiRequest, type ApiEnvelope } from './lib/api'
 import { createGoogleProvider, getFirebaseAuth } from './lib/firebase'
+import { streamChat } from './lib/sse'
 import { friendlyAuthError } from './features/dev-token/auth-errors'
 import './App.css'
 
@@ -8,30 +10,32 @@ type Lang = 'en' | 'vi'
 type AppRoute = '/login' | '/welcome' | '/sops-chat'
 type IconName = 'alert' | 'arrow' | 'check' | 'chevron' | 'collapse' | 'doc' | 'grid' | 'logout' | 'menu' | 'message' | 'mic' | 'send'
 type Citation = { title: string; meta: string; url: string }
-type Message = { id: number; role: 'user' | 'bot'; text: string; citations?: Citation[] }
-type AppUser = Pick<FirebaseUser, 'displayName' | 'email'>
+type Message = { id: string; role: 'user' | 'bot'; text: string; citations?: Citation[] }
+type AppUser = { displayName: string; email: string }
+type KbmUser = { id: string; email: string; display_name: string; avatar_url: string | null; status: string }
+type Conversation = { id: string; title: string | null; status: string }
+type StoredMessage = { id: string; role: string; content: string; status: string }
 
 const copy = {
   en: {
-    signTitle: 'Employee Portal', signSub: 'Sign in with your King Bánh Mì Google account to reach your tools.', signBtn: 'Continue with Google', signOther: 'Use another account', signFoot: 'Only @kingbanhmi.net accounts have access.',
+    signTitle: 'Employee Portal', signSub: 'Sign in with your King Bánh Mì Google account to reach your tools.', signBtn: 'Continue with Google', signOther: 'Use another account', signFoot: 'Only approved employee accounts have access.',
     denyTitle: 'Account not allowed', denySub: "This Google account isn't on the King Bánh Mì team directory.", denyBtn: 'Try a different account', denyHelp: 'Need access? Ask your store manager.',
     date: 'Wednesday, Sep 9', greet: 'Chào', shift: "Today's shift", shiftRole: 'Line · Sandwich', tools: 'Your tools', tileSop: 'Ask anything about prep, cleaning, register or opening steps.', tileVoice: 'Voice Assistant', soon: 'Coming soon', soonTag: 'Soon',
-    status: 'Answers from 42 published SOPs', sources: 'Sources', placeholder: 'Ask about an SOP…', voiceSoon: "Voice chat isn't live yet — shipping in a future release.", portal: 'Employee Portal', workspace: 'Workspace', home: 'Welcome', signOut: 'Sign out', send: 'Send', collapse: 'Collapse',
-    cats: ['All', 'Opening', 'Food prep', 'Cleaning', 'Register', 'Closing'], topHomeSub: 'Your shift and tools', topChatSub: 'Answers cite the published SOP',
-    hello: 'Hi Frank — ask me anything from the SOP library. I’ll answer from published procedures and show you exactly where the information came from.', sampleUser: 'What temperature should the chicken reach?', sampleBot: 'Chicken must reach an internal temperature of 165°F (74°C). Check the thickest part with a sanitized probe and record the reading before service.', response: 'Based on the current SOP, complete the safety check, record the result on the shift log, and tell your manager right away if anything is outside the approved range.', authError: 'Unable to sign in. Check the Firebase settings and try again.',
+    status: 'Answers from published SOPs', sources: 'Sources', placeholder: 'Ask about an SOP…', voiceSoon: "Voice chat isn't live yet — shipping in a future release.", portal: 'Employee Portal', workspace: 'Workspace', home: 'Welcome', signOut: 'Sign out', send: 'Send', collapse: 'Collapse', chatLoadError: 'Could not load the conversation.', chatSendError: 'Could not complete the answer. Please try again.',
+    cats: ['All', 'Opening', 'Food prep', 'Cleaning', 'Register', 'Closing'], topHomeSub: 'Your shift and tools', topChatSub: 'Live answers from published SOPs',
+    hello: 'Hi — ask me anything from the SOP library. I’ll answer from the published procedures.', authError: 'Unable to sign in. Check the Firebase settings and try again.',
   },
   vi: {
-    signTitle: 'Cổng Nhân Viên', signSub: 'Đăng nhập bằng tài khoản Google King Bánh Mì để vào công cụ của bạn.', signBtn: 'Tiếp tục với Google', signOther: 'Dùng tài khoản khác', signFoot: 'Chỉ tài khoản @kingbanhmi.net được truy cập.',
+    signTitle: 'Cổng Nhân Viên', signSub: 'Đăng nhập bằng tài khoản Google King Bánh Mì để vào công cụ của bạn.', signBtn: 'Tiếp tục với Google', signOther: 'Dùng tài khoản khác', signFoot: 'Chỉ tài khoản nhân viên đã được cấp quyền mới có thể truy cập.',
     denyTitle: 'Tài khoản không hợp lệ', denySub: 'Tài khoản Google này không có trong danh bạ nhân viên King Bánh Mì.', denyBtn: 'Thử tài khoản khác', denyHelp: 'Cần quyền truy cập? Hỏi quản lý cửa hàng.',
     date: 'Thứ Tư, 9 Th9', greet: 'Chào', shift: 'Ca hôm nay', shiftRole: 'Quầy · Bánh mì', tools: 'Công cụ của bạn', tileSop: 'Hỏi bất cứ điều gì về sơ chế, vệ sinh, thu ngân hay mở ca.', tileVoice: 'Trợ lý giọng nói', soon: 'Sắp ra mắt', soonTag: 'Sắp có',
-    status: 'Trả lời từ 42 SOP đã ban hành', sources: 'Nguồn', placeholder: 'Hỏi về một SOP…', voiceSoon: 'Trò chuyện bằng giọng nói chưa hoạt động — sẽ ra mắt ở bản sau.', portal: 'Cổng Nhân Viên', workspace: 'Không gian làm việc', home: 'Trang chào', signOut: 'Đăng xuất', send: 'Gửi', collapse: 'Thu gọn',
-    cats: ['Tất cả', 'Mở ca', 'Sơ chế', 'Vệ sinh', 'Thu ngân', 'Đóng ca'], topHomeSub: 'Ca làm và công cụ của bạn', topChatSub: 'Câu trả lời dẫn nguồn SOP đã ban hành',
-    hello: 'Chào Frank — hãy hỏi tôi bất cứ điều gì trong thư viện SOP. Tôi sẽ trả lời từ quy trình đã ban hành và chỉ rõ nguồn thông tin.', sampleUser: 'Nhiệt độ bên trong của gà phải đạt bao nhiêu?', sampleBot: 'Thịt gà phải đạt nhiệt độ bên trong 165°F (74°C). Đo ở phần dày nhất bằng que đo đã khử trùng và ghi lại kết quả trước khi phục vụ.', response: 'Theo SOP hiện hành, hãy hoàn tất bước kiểm tra an toàn, ghi kết quả vào nhật ký ca và báo ngay cho quản lý nếu có chỉ số nằm ngoài phạm vi cho phép.', authError: 'Không thể đăng nhập. Hãy kiểm tra cấu hình Firebase và thử lại.',
+    status: 'Trả lời từ các SOP đã ban hành', sources: 'Nguồn', placeholder: 'Hỏi về một SOP…', voiceSoon: 'Trò chuyện bằng giọng nói chưa hoạt động — sẽ ra mắt ở bản sau.', portal: 'Cổng Nhân Viên', workspace: 'Không gian làm việc', home: 'Trang chào', signOut: 'Đăng xuất', send: 'Gửi', collapse: 'Thu gọn', chatLoadError: 'Không thể tải cuộc trò chuyện.', chatSendError: 'Không thể hoàn tất câu trả lời. Vui lòng thử lại.',
+    cats: ['Tất cả', 'Mở ca', 'Sơ chế', 'Vệ sinh', 'Thu ngân', 'Đóng ca'], topHomeSub: 'Ca làm và công cụ của bạn', topChatSub: 'Trả lời trực tiếp từ SOP đã ban hành',
+    hello: 'Chào bạn — hãy hỏi mình bất cứ điều gì trong thư viện SOP. Mình sẽ trả lời từ các quy trình đã ban hành.', authError: 'Không thể đăng nhập. Hãy kiểm tra cấu hình Firebase và thử lại.',
   },
 } as const
 
 const counts = [42, 6, 14, 9, 7, 6]
-const source: Citation = { title: 'Chicken Cooking & Holding', meta: 'Section 3.2 · updated Aug 2026', url: '/sops/docs/chicken-cooking?section=3.2' }
 
 function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, ReactNode> = {
@@ -78,34 +82,152 @@ function MessageBubble({ message, sourceLabel }: { message: Message; sourceLabel
 
 function Chat({ lang }: { lang: Lang }) {
   const t = copy[lang]
-  const initialMessages = useMemo<Message[]>(() => [{ id: 1, role: 'bot', text: t.hello }, { id: 2, role: 'user', text: t.sampleUser }, { id: 3, role: 'bot', text: t.sampleBot, citations: [source] }], [t])
-  const [messages, setMessages] = useState(initialMessages), [category, setCategory] = useState(0), [input, setInput] = useState(''), [pending, setPending] = useState(false), [toast, setToast] = useState(false)
+  const [messages, setMessages] = useState<Message[]>([])
+  const [conversationId, setConversationId] = useState<string | null>(null)
+  const [category, setCategory] = useState(0)
+  const [input, setInput] = useState('')
+  const [pending, setPending] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [streamingReply, setStreamingReply] = useState<string | null>(null)
+  const [chatError, setChatError] = useState<string | null>(null)
+  const [toast, setToast] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, pending])
+
+  useEffect(() => {
+    let active = true
+    async function loadLatestConversation() {
+      try {
+        const conversations = await apiRequest<ApiEnvelope<Conversation[]>>('conversations?limit=1&offset=0')
+        const latest = conversations?.data[0]
+        if (!active) return
+        if (!latest) {
+          setMessages([{ id: 'welcome', role: 'bot', text: t.hello }])
+          return
+        }
+        setConversationId(latest.id)
+        const history = await apiRequest<ApiEnvelope<StoredMessage[]>>(`conversations/${latest.id}/messages?limit=50&offset=0`)
+        if (!active || !history) return
+        const loadedMessages: Message[] = history.data.map(message => ({
+          id: message.id,
+          role: message.role === 'user' ? 'user' : 'bot',
+          text: message.content,
+        }))
+        setMessages(loadedMessages.length ? loadedMessages : [{ id: 'welcome', role: 'bot', text: t.hello }])
+      } catch (error) {
+        if (active) setChatError(error instanceof ApiError ? error.message : t.chatLoadError)
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+    void loadLatestConversation()
+    return () => { active = false }
+  }, [t.chatLoadError, t.hello])
+
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, pending, streamingReply])
   function showVoice() { setToast(true); window.setTimeout(() => setToast(false), 3000) }
-  function send(event: FormEvent) { event.preventDefault(); const value = input.trim(); if (!value || pending) return; setMessages(old => [...old, { id: Date.now(), role: 'user', text: value }]); setInput(''); setPending(true); window.setTimeout(() => { setMessages(old => [...old, { id: Date.now() + 1, role: 'bot', text: t.response, citations: [source] }]); setPending(false) }, 850) }
-  return <div className="chat-shell"><div className="category-mobile">{t.cats.map((cat, index) => <button className={category === index ? 'active' : ''} key={cat} onClick={() => setCategory(index)}>{cat}</button>)}</div><div className="chat-main"><div className="messages" aria-live="polite">{messages.map(message => <MessageBubble key={message.id} message={message} sourceLabel={t.sources}/>)}{pending && <div className="message-row bot"><div className="bubble typing"><i/><i/><i/></div></div>}<div ref={endRef}/></div><form className="composer" onSubmit={send}><input value={input} onChange={event => setInput(event.target.value)} placeholder={t.placeholder} aria-label={t.placeholder}/><button type="button" className="mic-button" onClick={showVoice} aria-label={t.tileVoice}><Icon name="mic"/></button><button className="send-button" disabled={!input.trim() || pending}><span>{t.send}</span><Icon name="send"/></button></form></div><aside className="category-panel"><span className="kicker">{lang === 'vi' ? 'Danh mục SOP' : 'SOP categories'}</span>{t.cats.map((cat, index) => <button className={category === index ? 'active' : ''} key={cat} onClick={() => setCategory(index)}><span>{cat}</span><b>{counts[index]}</b></button>)}</aside>{toast && <div className="toast" role="status">{t.voiceSoon}</div>}</div>
+
+  async function send(event: FormEvent) {
+    event.preventDefault()
+    const query = input.trim()
+    if (!query || pending || loading) return
+    const userMessage: Message = { id: `local-user-${Date.now()}`, role: 'user', text: query }
+    setMessages(old => [...old, userMessage])
+    setInput('')
+    setChatError(null)
+    setPending(true)
+    setStreamingReply('')
+    let reply = ''
+    try {
+      let activeConversationId = conversationId
+      if (!activeConversationId) {
+        const created = await apiRequest<ApiEnvelope<Conversation>>('conversations', { method: 'POST', body: JSON.stringify({}) })
+        if (!created) throw new ApiError(t.chatSendError, 'CONVERSATION_CREATE_FAILED', 500)
+        activeConversationId = created.data.id
+        setConversationId(activeConversationId)
+      }
+      await streamChat({
+        conversationId: activeConversationId,
+        query,
+        inputs: {},
+        onEvent: (eventName, payload) => {
+          if (eventName === 'message_delta') reply += payload.text ?? ''
+          if (eventName === 'message_replace') reply = payload.text ?? ''
+          if (eventName === 'message_delta' || eventName === 'message_replace') setStreamingReply(reply)
+        },
+      })
+      if (reply.trim()) setMessages(old => [...old, { id: `assistant-${Date.now()}`, role: 'bot', text: reply }])
+    } catch (error) {
+      if (reply.trim()) setMessages(old => [...old, { id: `assistant-partial-${Date.now()}`, role: 'bot', text: reply }])
+      setChatError(error instanceof ApiError ? error.message : t.chatSendError)
+    } finally {
+      setStreamingReply(null)
+      setPending(false)
+    }
+  }
+
+  return <div className="chat-shell"><div className="category-mobile">{t.cats.map((cat, index) => <button className={category === index ? 'active' : ''} key={cat} onClick={() => setCategory(index)}>{cat}</button>)}</div><div className="chat-main"><div className="messages" aria-live="polite">{messages.map(message => <MessageBubble key={message.id} message={message} sourceLabel={t.sources}/>)}{loading && <div className="message-row bot"><div className="bubble typing" aria-label={t.chatLoadError}><i/><i/><i/></div></div>}{streamingReply !== null && <div className="message-row bot"><div className={`bubble${streamingReply ? '' : ' typing'}`}>{streamingReply || <><i/><i/><i/></>}</div></div>}{chatError && <div className="chat-error" role="alert">{chatError}</div>}<div ref={endRef}/></div><form className="composer" onSubmit={send}><input value={input} onChange={event => setInput(event.target.value)} placeholder={t.placeholder} aria-label={t.placeholder} disabled={loading}/><button type="button" className="mic-button" onClick={showVoice} aria-label={t.tileVoice}><Icon name="mic"/></button><button className="send-button" disabled={!input.trim() || pending || loading}><span>{t.send}</span><Icon name="send"/></button></form></div><aside className="category-panel"><span className="kicker">{lang === 'vi' ? 'Danh mục SOP' : 'SOP categories'}</span>{t.cats.map((cat, index) => <button className={category === index ? 'active' : ''} key={cat} onClick={() => setCategory(index)}><span>{cat}</span><b>{counts[index]}</b></button>)}</aside>{toast && <div className="toast" role="status">{t.voiceSoon}</div>}</div>
 }
 
 function App() {
   const params = new URLSearchParams(window.location.search), preview = import.meta.env.DEV && params.get('preview') === '1'
   const [lang, setLangState] = useState<Lang>(() => localStorage.getItem('kbm-lang') === 'en' ? 'en' : 'vi'), [route, setRoute] = useState<AppRoute>(readRoute), [user, setUser] = useState<AppUser | null>(() => preview ? { displayName: 'Frank Nguyễn', email: 'frank@kingbanhmi.net' } : null), [authReady, setAuthReady] = useState(preview), [authError, setAuthError] = useState<string | null>(null), [busy, setBusy] = useState(false), [drawerOpen, setDrawerOpen] = useState(false), [workspaceOpen, setWorkspaceOpen] = useState(false), [expanded, setExpanded] = useState(() => localStorage.getItem('kbm-sidebar') !== 'collapsed')
-  const deniedEmail = params.get('email') ?? (params.get('error') === 'domain' ? 'frank.nguyen@gmail.com' : null)
+  const backendLoginRef = useRef<Promise<ApiEnvelope<KbmUser> | undefined> | null>(null)
+  const deniedEmail = params.get('email') ?? (params.get('error') === 'access' ? 'unknown' : null)
   useEffect(() => { const handler = () => setRoute(readRoute()); window.addEventListener('popstate', handler); return () => window.removeEventListener('popstate', handler) }, [])
   // Auth state is an external subscription; the fallback resolves immediately when Firebase is absent.
   // oxlint-disable-next-line react/set-state-in-effect
-  useEffect(() => { if (preview) return; try { return onAuthStateChanged(getFirebaseAuth(), value => { setUser(value); setAuthReady(true); if (!value && readRoute() !== '/login') navigate('/login', true) }) } catch { setAuthReady(true) } }, [preview])
+  useEffect(() => {
+    if (preview) return
+    try {
+      return onAuthStateChanged(getFirebaseAuth(), firebaseUser => {
+        if (!firebaseUser) {
+          backendLoginRef.current = null
+          setUser(null)
+          setAuthReady(true)
+          setBusy(false)
+          if (readRoute() !== '/login') navigate('/login', true)
+          return
+        }
+        backendLoginRef.current ??= apiRequest<ApiEnvelope<KbmUser>>('auth/google', { method: 'POST' })
+        void backendLoginRef.current.then(result => {
+          if (!result) throw new ApiError('Backend không trả về hồ sơ nhân viên.', 'INVALID_RESPONSE', 502)
+          setUser({ displayName: result.data.display_name, email: result.data.email })
+          setAuthReady(true)
+          setBusy(false)
+          if (readRoute() === '/login') navigate('/welcome', true)
+        }).catch(async error => {
+          const email = firebaseUser.email ?? ''
+          backendLoginRef.current = null
+          await signOut(getFirebaseAuth()).catch(() => undefined)
+          setUser(null)
+          setAuthReady(true)
+          setBusy(false)
+          if (error instanceof ApiError && ['ACCESS_NOT_GRANTED', 'USER_BLOCKED'].includes(error.code)) {
+            window.location.replace(`/login?error=access&email=${encodeURIComponent(email)}`)
+          } else {
+            setAuthError(error instanceof ApiError ? error.message : copy[lang].authError)
+            navigate('/login', true)
+          }
+        })
+      })
+    } catch {
+      queueMicrotask(() => {
+        setAuthReady(true)
+        setBusy(false)
+      })
+    }
+  }, [lang, preview])
   useEffect(() => { if (!drawerOpen) return; const close = (event: KeyboardEvent) => event.key === 'Escape' && setDrawerOpen(false); document.addEventListener('keydown', close); return () => document.removeEventListener('keydown', close) }, [drawerOpen])
   function setLang(value: Lang) { setLangState(value); localStorage.setItem('kbm-lang', value); document.documentElement.lang = value }
   function go(next: AppRoute) { navigate(next); setDrawerOpen(false); setWorkspaceOpen(false) }
-  async function login() { setBusy(true); setAuthError(null); try { const result = await signInWithPopup(getFirebaseAuth(), createGoogleProvider()); const email = result.user.email ?? ''; if (!email.toLowerCase().endsWith('@kingbanhmi.net')) { await signOut(getFirebaseAuth()); window.history.replaceState({}, '', `/login?error=domain&email=${encodeURIComponent(email)}`); window.location.reload(); return } setUser(result.user); navigate('/welcome') } catch (error) { setAuthError(friendlyAuthError(error) || copy[lang].authError) } finally { setBusy(false) } }
-  async function logout() { try { await signOut(getFirebaseAuth()) } finally { setUser(null); navigate('/login') } }
+  async function login() { setBusy(true); setAuthError(null); try { await signInWithPopup(getFirebaseAuth(), createGoogleProvider()) } catch (error) { setAuthError(friendlyAuthError(error) || copy[lang].authError); setBusy(false) } }
+  async function logout() { try { backendLoginRef.current = null; await signOut(getFirebaseAuth()) } finally { setUser(null); navigate('/login') } }
   function toggleExpanded() { setExpanded(old => { localStorage.setItem('kbm-sidebar', old ? 'collapsed' : 'expanded'); return !old }) }
   if (route === '/login') return <Login lang={lang} setLang={setLang} deniedEmail={deniedEmail} onLogin={login} busy={busy} error={authError}/>
   if (!authReady) return <div className="loading"><img src="/logo-mark.png" alt="King Bánh Mì"/></div>
   if (!user) return null
   const userName = user.displayName || 'Frank Nguyễn', firstName = userName.split(/\s+/)[0]
-  return <div className={`app-frame ${expanded ? '' : 'sidebar-collapsed'}`}><Sidebar lang={lang} route={route} expanded={expanded} drawerOpen={drawerOpen} workspaceOpen={workspaceOpen} userName={userName} userEmail={user.email ?? 'frank@kingbanhmi.net'} onNavigate={go} onClose={() => setDrawerOpen(false)} onToggleExpanded={toggleExpanded} onToggleWorkspace={() => setWorkspaceOpen(old => !old)} onSignOut={logout}/><main className="app-main"><AppHeader lang={lang} route={route} name={userName} role={copy[lang].shiftRole} onMenu={() => setDrawerOpen(true)}/><div className="app-toolbar"><LanguageToggle lang={lang} onChange={setLang}/></div>{route === '/welcome' ? <Welcome lang={lang} firstName={firstName} onOpenChat={() => go('/sops-chat')}/> : <Chat key={lang} lang={lang}/>}</main></div>
+  return <div className={`app-frame ${expanded ? '' : 'sidebar-collapsed'}`}><Sidebar lang={lang} route={route} expanded={expanded} drawerOpen={drawerOpen} workspaceOpen={workspaceOpen} userName={userName} userEmail={user.email} onNavigate={go} onClose={() => setDrawerOpen(false)} onToggleExpanded={toggleExpanded} onToggleWorkspace={() => setWorkspaceOpen(old => !old)} onSignOut={logout}/><main className="app-main"><AppHeader lang={lang} route={route} name={userName} role={copy[lang].shiftRole} onMenu={() => setDrawerOpen(true)}/><div className="app-toolbar"><LanguageToggle lang={lang} onChange={setLang}/></div>{route === '/welcome' ? <Welcome lang={lang} firstName={firstName} onOpenChat={() => go('/sops-chat')}/> : <Chat key={lang} lang={lang}/>}</main></div>
 }
 
 export default App
