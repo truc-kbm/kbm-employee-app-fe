@@ -4,15 +4,16 @@ import { ApiError, apiRequest, type ApiEnvelope } from './lib/api'
 import { createGoogleProvider, getFirebaseAuth } from './lib/firebase'
 import { streamChat } from './lib/sse'
 import { friendlyAuthError } from './features/dev-token/auth-errors'
+import { AdminPage } from './features/admin/AdminPage'
 import './App.css'
 
 type Lang = 'en' | 'vi'
-type AppRoute = '/login' | '/welcome' | '/sops-chat'
-type IconName = 'alert' | 'arrow' | 'check' | 'chevron' | 'collapse' | 'doc' | 'grid' | 'logout' | 'menu' | 'message' | 'mic' | 'send'
+type AppRoute = '/login' | '/welcome' | '/sops-chat' | '/admin'
+type IconName = 'alert' | 'arrow' | 'check' | 'chevron' | 'collapse' | 'doc' | 'grid' | 'logout' | 'menu' | 'message' | 'mic' | 'send' | 'users'
 type Citation = { title: string; meta: string; url: string }
 type Message = { id: string; role: 'user' | 'bot'; text: string; citations?: Citation[] }
-type AppUser = { displayName: string; email: string }
-type KbmUser = { id: string; email: string; display_name: string; avatar_url: string | null; status: string }
+type AppUser = { displayName: string; email: string; role: 'user' | 'admin' }
+type KbmUser = { id: string; email: string; display_name: string; avatar_url: string | null; status: string; role: 'user' | 'admin' }
 type Conversation = { id: string; title: string | null; status: string }
 type StoredMessage = { id: string; role: string; content: string; status: string }
 
@@ -41,12 +42,12 @@ function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, ReactNode> = {
     alert: <><path d="M12 9v4"/><path d="M12 17h.01"/><circle cx="12" cy="12" r="10"/></>, arrow: <><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></>, check: <path d="M20 6 9 17l-5-5"/>, chevron: <path d="m9 18 6-6-6-6"/>, collapse: <path d="m15 18-6-6 6-6"/>,
     doc: <><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m9 15 2 2 4-4"/></>, grid: <><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></>,
-    logout: <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></>, menu: <><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h11"/></>, message: <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>, mic: <><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></>, send: <><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></>,
+    logout: <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></>, menu: <><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h11"/></>, message: <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>, mic: <><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></>, send: <><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></>, users: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></>,
   }
   return <svg className="icon" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>
 }
 
-function readRoute(): AppRoute { return window.location.pathname === '/welcome' || window.location.pathname === '/sops-chat' ? window.location.pathname : '/login' }
+function readRoute(): AppRoute { return ['/welcome', '/sops-chat', '/admin'].includes(window.location.pathname) ? window.location.pathname as AppRoute : '/login' }
 function navigate(route: AppRoute, replace = false) { window.history[replace ? 'replaceState' : 'pushState']({}, '', route); window.dispatchEvent(new PopStateEvent('popstate')) }
 function initials(name: string) { return name.split(/\s+/).map(value => value[0]).slice(0, 2).join('').toUpperCase() }
 
@@ -60,13 +61,13 @@ function Login({ lang, setLang, deniedEmail, onLogin, busy, error }: { lang: Lan
   return <main className="auth-page"><div className="auth-lang"><LanguageToggle lang={lang} onChange={setLang} dark /></div><section className="brand-panel"><div className="brand-lockup"><img src="/logo-mark.png" alt=""/><img src="/logo-wordmark.png" alt="King Bánh Mì"/></div><div className="brand-message"><h1>{t.signTitle}</h1><p>{t.signSub}</p></div><p className="auth-foot">{t.signFoot}</p></section><section className="signin-panel"><div className="signin-card"><span className="kicker">{lang === 'vi' ? 'Chào mừng trở lại' : 'Welcome back'}</span><h2>{lang === 'vi' ? 'Đăng nhập' : 'Sign in'}</h2><p>{lang === 'vi' ? 'Dùng tài khoản Google quản lý đã cấp cho bạn.' : 'Use the Google account your manager set up for you.'}</p><button className="google-button" onClick={onLogin} disabled={busy}><span className="google-g">G</span>{busy ? 'Google…' : t.signBtn}</button><button className="other-button" onClick={onLogin} disabled={busy}>{t.signOther}</button>{error && <div className="auth-error" role="alert">{error}</div>}</div></section></main>
 }
 
-function Sidebar({ lang, route, expanded, drawerOpen, workspaceOpen, userName, userEmail, onNavigate, onClose, onToggleExpanded, onToggleWorkspace, onSignOut }: { lang: Lang; route: AppRoute; expanded: boolean; drawerOpen: boolean; workspaceOpen: boolean; userName: string; userEmail: string; onNavigate: (route: AppRoute) => void; onClose: () => void; onToggleExpanded: () => void; onToggleWorkspace: () => void; onSignOut: () => void }) {
+function Sidebar({ lang, route, expanded, drawerOpen, workspaceOpen, userName, userEmail, isAdmin, onNavigate, onClose, onToggleExpanded, onToggleWorkspace, onSignOut }: { lang: Lang; route: AppRoute; expanded: boolean; drawerOpen: boolean; workspaceOpen: boolean; userName: string; userEmail: string; isAdmin: boolean; onNavigate: (route: AppRoute) => void; onClose: () => void; onToggleExpanded: () => void; onToggleWorkspace: () => void; onSignOut: () => void }) {
   const t = copy[lang]
-  const content = <aside className={`sidebar ${expanded ? '' : 'collapsed'}`} aria-label="Primary navigation"><div className="side-brand"><img src="/logo-mark.png" alt=""/><div className="side-brand-copy"><img src="/logo-wordmark.png" alt="King Bánh Mì"/><span>{t.portal}</span></div></div><div className="workspace-wrap"><span className="side-kicker">{t.workspace}</span><button className="workspace-button" aria-expanded={workspaceOpen} onClick={onToggleWorkspace}><Icon name="message" size={18}/><b>SOPs Chat Bot</b><span className={`turn ${workspaceOpen ? 'open' : ''}`}><Icon name="chevron" size={16}/></span></button>{workspaceOpen && <div className="workspace-menu" role="menu"><button role="menuitem" onClick={() => onNavigate('/sops-chat')}><Icon name="message" size={16}/>SOPs Chat Bot<span><Icon name="check" size={16}/></span></button><div><Icon name="mic" size={16}/>{t.tileVoice}<em>{t.soonTag}</em></div></div>}</div><nav className="side-nav"><button className={route === '/welcome' ? 'active' : ''} onClick={() => onNavigate('/welcome')} title={t.home}><Icon name="grid"/><span>{t.home}</span></button><button className={route === '/sops-chat' ? 'active' : ''} onClick={() => onNavigate('/sops-chat')} title="SOPs Chat Bot"><Icon name="message"/><span>SOPs Chat Bot</span></button></nav><div className="side-spacer"/><div className="side-user"><span className="avatar small">{initials(userName)}</span><span className="user-copy"><b>{userName}</b><small>{userEmail}</small></span><button className="logout-icon" onClick={onSignOut} aria-label={t.signOut}><Icon name="logout" size={17}/></button></div><button className="mobile-signout" onClick={onSignOut}><Icon name="logout" size={16}/>{t.signOut}</button><button className="collapse-button" onClick={onToggleExpanded} title={t.collapse}><span className={expanded ? '' : 'flipped'}><Icon name="collapse" size={16}/></span><span>{t.collapse}</span></button></aside>
+  const content = <aside className={`sidebar ${expanded ? '' : 'collapsed'}`} aria-label="Primary navigation"><div className="side-brand"><img src="/logo-mark.png" alt=""/><div className="side-brand-copy"><img src="/logo-wordmark.png" alt="King Bánh Mì"/><span>{t.portal}</span></div></div><div className="workspace-wrap"><span className="side-kicker">{t.workspace}</span><button className="workspace-button" aria-expanded={workspaceOpen} onClick={onToggleWorkspace}><Icon name="message" size={18}/><b>SOPs Chat Bot</b><span className={`turn ${workspaceOpen ? 'open' : ''}`}><Icon name="chevron" size={16}/></span></button>{workspaceOpen && <div className="workspace-menu" role="menu"><button role="menuitem" onClick={() => onNavigate('/sops-chat')}><Icon name="message" size={16}/>SOPs Chat Bot<span><Icon name="check" size={16}/></span></button><div><Icon name="mic" size={16}/>{t.tileVoice}<em>{t.soonTag}</em></div></div>}</div><nav className="side-nav"><button className={route === '/welcome' ? 'active' : ''} onClick={() => onNavigate('/welcome')} title={t.home}><Icon name="grid"/><span>{t.home}</span></button><button className={route === '/sops-chat' ? 'active' : ''} onClick={() => onNavigate('/sops-chat')} title="SOPs Chat Bot"><Icon name="message"/><span>SOPs Chat Bot</span></button>{isAdmin && <button className={route === '/admin' ? 'active' : ''} onClick={() => onNavigate('/admin')} title="Admin"><Icon name="users"/><span>Admin</span></button>}</nav><div className="side-spacer"/><div className="side-user"><span className="avatar small">{initials(userName)}</span><span className="user-copy"><b>{userName}</b><small>{userEmail}</small></span><button className="logout-icon" onClick={onSignOut} aria-label={t.signOut}><Icon name="logout" size={17}/></button></div><button className="mobile-signout" onClick={onSignOut}><Icon name="logout" size={16}/>{t.signOut}</button><button className="collapse-button" onClick={onToggleExpanded} title={t.collapse}><span className={expanded ? '' : 'flipped'}><Icon name="collapse" size={16}/></span><span>{t.collapse}</span></button></aside>
   return <><div className="desktop-sidebar">{content}</div>{drawerOpen && <div className="drawer-layer"><button className="drawer-scrim" onClick={onClose} aria-label="Close menu"/>{content}</div>}</>
 }
 
-function AppHeader({ lang, route, name, email, role, onMenu, onNavigate, onSignOut }: { lang: Lang; route: AppRoute; name: string; email: string; role: string; onMenu: () => void; onNavigate: (route: AppRoute) => void; onSignOut: () => void }) {
+function AppHeader({ lang, route, name, email, role, isAdmin, onMenu, onNavigate, onSignOut }: { lang: Lang; route: AppRoute; name: string; email: string; role: string; isAdmin: boolean; onMenu: () => void; onNavigate: (route: AppRoute) => void; onSignOut: () => void }) {
   const t = copy[lang]
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const userMenuRef = useRef<HTMLDivElement>(null)
@@ -97,7 +98,9 @@ function AppHeader({ lang, route, name, email, role, onMenu, onNavigate, onSignO
     onSignOut()
   }
 
-  return <header className="app-header"><button className="hamburger" onClick={onMenu} aria-label="Open menu"><Icon name="menu"/></button><div className="header-title"><b>{route === '/welcome' ? t.home : 'SOPs Chat Bot'}</b><span>{route === '/welcome' ? t.topHomeSub : t.topChatSub}</span></div><div className="header-user" ref={userMenuRef}><button className="header-user-trigger" onClick={() => setUserMenuOpen(open => !open)} aria-expanded={userMenuOpen} aria-haspopup="menu" aria-label={lang === 'vi' ? 'Mở menu tài khoản' : 'Open account menu'}><span><b>{name}</b><small>{role} · Bellaire 02</small></span><span className="avatar">{initials(name)}</span><span className={`header-user-chevron${userMenuOpen ? ' open' : ''}`}><Icon name="chevron" size={15}/></span></button>{userMenuOpen && <div className="header-user-menu" role="menu"><div className="header-user-summary"><b>{name}</b><small>{email}</small></div><button role="menuitem" onClick={() => chooseRoute('/welcome')}><Icon name="grid" size={17}/><span>{t.home}</span>{route === '/welcome' && <Icon name="check" size={15}/>}</button><button role="menuitem" onClick={() => chooseRoute('/sops-chat')}><Icon name="message" size={17}/><span>SOPs Chat Bot</span>{route === '/sops-chat' && <Icon name="check" size={15}/>}</button><div className="header-menu-separator"/><button className="header-signout" role="menuitem" onClick={chooseSignOut}><Icon name="logout" size={17}/><span>{t.signOut}</span></button></div>}</div></header>
+  const title = route === '/welcome' ? t.home : route === '/admin' ? 'Admin' : 'SOPs Chat Bot'
+  const subtitle = route === '/welcome' ? t.topHomeSub : route === '/admin' ? (lang === 'vi' ? 'Quản lý người dùng và quyền truy cập' : 'Users and access management') : t.topChatSub
+  return <header className="app-header"><button className="hamburger" onClick={onMenu} aria-label="Open menu"><Icon name="menu"/></button><div className="header-title"><b>{title}</b><span>{subtitle}</span></div><div className="header-user" ref={userMenuRef}><button className="header-user-trigger" onClick={() => setUserMenuOpen(open => !open)} aria-expanded={userMenuOpen} aria-haspopup="menu" aria-label={lang === 'vi' ? 'Mở menu tài khoản' : 'Open account menu'}><span><b>{name}</b><small>{role} · Bellaire 02</small></span><span className="avatar">{initials(name)}</span><span className={`header-user-chevron${userMenuOpen ? ' open' : ''}`}><Icon name="chevron" size={15}/></span></button>{userMenuOpen && <div className="header-user-menu" role="menu"><div className="header-user-summary"><b>{name}</b><small>{email}</small></div><button role="menuitem" onClick={() => chooseRoute('/welcome')}><Icon name="grid" size={17}/><span>{t.home}</span>{route === '/welcome' && <Icon name="check" size={15}/>}</button><button role="menuitem" onClick={() => chooseRoute('/sops-chat')}><Icon name="message" size={17}/><span>SOPs Chat Bot</span>{route === '/sops-chat' && <Icon name="check" size={15}/>}</button>{isAdmin && <button role="menuitem" onClick={() => chooseRoute('/admin')}><Icon name="users" size={17}/><span>Admin</span>{route === '/admin' && <Icon name="check" size={15}/>}</button>}<div className="header-menu-separator"/><button className="header-signout" role="menuitem" onClick={chooseSignOut}><Icon name="logout" size={17}/><span>{t.signOut}</span></button></div>}</div></header>
 }
 
 function Welcome({ lang, firstName, onOpenChat }: { lang: Lang; firstName: string; onOpenChat: () => void }) {
@@ -199,7 +202,7 @@ function Chat({ lang }: { lang: Lang }) {
 
 function App() {
   const params = new URLSearchParams(window.location.search), preview = import.meta.env.DEV && params.get('preview') === '1'
-  const [lang, setLangState] = useState<Lang>(() => localStorage.getItem('kbm-lang') === 'en' ? 'en' : 'vi'), [route, setRoute] = useState<AppRoute>(readRoute), [user, setUser] = useState<AppUser | null>(() => preview ? { displayName: 'Frank Nguyễn', email: 'frank@kingbanhmi.net' } : null), [authReady, setAuthReady] = useState(preview), [authError, setAuthError] = useState<string | null>(null), [busy, setBusy] = useState(false), [drawerOpen, setDrawerOpen] = useState(false), [workspaceOpen, setWorkspaceOpen] = useState(false), [expanded, setExpanded] = useState(() => localStorage.getItem('kbm-sidebar') !== 'collapsed')
+  const [lang, setLangState] = useState<Lang>(() => localStorage.getItem('kbm-lang') === 'en' ? 'en' : 'vi'), [route, setRoute] = useState<AppRoute>(readRoute), [user, setUser] = useState<AppUser | null>(() => preview ? { displayName: 'Frank Nguyễn', email: 'frank@kingbanhmi.net', role: 'admin' } : null), [authReady, setAuthReady] = useState(preview), [authError, setAuthError] = useState<string | null>(null), [busy, setBusy] = useState(false), [drawerOpen, setDrawerOpen] = useState(false), [workspaceOpen, setWorkspaceOpen] = useState(false), [expanded, setExpanded] = useState(() => localStorage.getItem('kbm-sidebar') !== 'collapsed')
   const backendLoginRef = useRef<Promise<ApiEnvelope<KbmUser> | undefined> | null>(null)
   const deniedEmail = params.get('email') ?? (params.get('error') === 'access' ? 'unknown' : null)
   useEffect(() => { const handler = () => setRoute(readRoute()); window.addEventListener('popstate', handler); return () => window.removeEventListener('popstate', handler) }, [])
@@ -220,7 +223,7 @@ function App() {
         backendLoginRef.current ??= apiRequest<ApiEnvelope<KbmUser>>('auth/google', { method: 'POST' })
         void backendLoginRef.current.then(result => {
           if (!result) throw new ApiError('Backend không trả về hồ sơ nhân viên.', 'INVALID_RESPONSE', 502)
-          setUser({ displayName: result.data.display_name, email: result.data.email })
+          setUser({ displayName: result.data.display_name, email: result.data.email, role: result.data.role })
           setAuthReady(true)
           setBusy(false)
           if (readRoute() === '/login') navigate('/welcome', true)
@@ -247,6 +250,7 @@ function App() {
     }
   }, [lang, preview])
   useEffect(() => { if (!drawerOpen) return; const close = (event: KeyboardEvent) => event.key === 'Escape' && setDrawerOpen(false); document.addEventListener('keydown', close); return () => document.removeEventListener('keydown', close) }, [drawerOpen])
+  useEffect(() => { if (authReady && user && route === '/admin' && user.role !== 'admin') navigate('/welcome', true) }, [authReady, route, user])
   function setLang(value: Lang) { setLangState(value); localStorage.setItem('kbm-lang', value); document.documentElement.lang = value }
   function go(next: AppRoute) { navigate(next); setDrawerOpen(false); setWorkspaceOpen(false) }
   async function login() { setBusy(true); setAuthError(null); try { await signInWithPopup(getFirebaseAuth(), createGoogleProvider()) } catch (error) { setAuthError(friendlyAuthError(error) || copy[lang].authError); setBusy(false) } }
@@ -255,8 +259,11 @@ function App() {
   if (route === '/login') return <Login lang={lang} setLang={setLang} deniedEmail={deniedEmail} onLogin={login} busy={busy} error={authError}/>
   if (!authReady) return <div className="loading"><img src="/logo-mark.png" alt="King Bánh Mì"/></div>
   if (!user) return null
+  if (route === '/admin' && user.role !== 'admin') return null
   const userName = user.displayName || 'Frank Nguyễn', firstName = userName.split(/\s+/)[0]
-  return <div className={`app-frame ${expanded ? '' : 'sidebar-collapsed'}`}><Sidebar lang={lang} route={route} expanded={expanded} drawerOpen={drawerOpen} workspaceOpen={workspaceOpen} userName={userName} userEmail={user.email} onNavigate={go} onClose={() => setDrawerOpen(false)} onToggleExpanded={toggleExpanded} onToggleWorkspace={() => setWorkspaceOpen(old => !old)} onSignOut={logout}/><main className="app-main"><AppHeader lang={lang} route={route} name={userName} email={user.email} role={copy[lang].shiftRole} onMenu={() => setDrawerOpen(true)} onNavigate={go} onSignOut={logout}/><div className="app-toolbar"><LanguageToggle lang={lang} onChange={setLang}/></div>{route === '/welcome' ? <Welcome lang={lang} firstName={firstName} onOpenChat={() => go('/sops-chat')}/> : <Chat key={lang} lang={lang}/>}</main></div>
+  const roleLabel = user.role === 'admin' ? (lang === 'vi' ? 'Quản trị viên' : 'Administrator') : copy[lang].shiftRole
+  const page = route === '/welcome' ? <Welcome lang={lang} firstName={firstName} onOpenChat={() => go('/sops-chat')}/> : route === '/admin' ? <AdminPage lang={lang}/> : <Chat key={lang} lang={lang}/>
+  return <div className={`app-frame ${expanded ? '' : 'sidebar-collapsed'}`}><Sidebar lang={lang} route={route} expanded={expanded} drawerOpen={drawerOpen} workspaceOpen={workspaceOpen} userName={userName} userEmail={user.email} isAdmin={user.role === 'admin'} onNavigate={go} onClose={() => setDrawerOpen(false)} onToggleExpanded={toggleExpanded} onToggleWorkspace={() => setWorkspaceOpen(old => !old)} onSignOut={logout}/><main className="app-main"><AppHeader lang={lang} route={route} name={userName} email={user.email} role={roleLabel} isAdmin={user.role === 'admin'} onMenu={() => setDrawerOpen(true)} onNavigate={go} onSignOut={logout}/><div className="app-toolbar"><LanguageToggle lang={lang} onChange={setLang}/></div>{page}</main></div>
 }
 
 export default App
