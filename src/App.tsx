@@ -12,8 +12,8 @@ type AppRoute = '/login' | '/welcome' | '/sops-chat' | '/admin'
 type IconName = 'alert' | 'arrow' | 'check' | 'chevron' | 'collapse' | 'doc' | 'grid' | 'logout' | 'menu' | 'message' | 'mic' | 'send' | 'users'
 type Citation = { title: string; meta: string; url: string }
 type Message = { id: string; role: 'user' | 'bot'; text: string; citations?: Citation[] }
-type AppUser = { displayName: string; email: string; role: 'user' | 'admin' }
-type KbmUser = { id: string; email: string; display_name: string; avatar_url: string | null; status: string; role: 'user' | 'admin' }
+type AppUser = { displayName: string; email: string; role: string }
+type KbmUser = { id: string; email: string; display_name: string; avatar_url: string | null; status: string; role: string }
 type Conversation = { id: string; title: string | null; status: string }
 type StoredMessage = { id: string; role: string; content: string; status: string }
 
